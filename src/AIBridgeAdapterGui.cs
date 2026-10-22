@@ -41,12 +41,20 @@ namespace TradosAIBridgeAdapterGui
         private TextBox txtEndpoint;
         private TextBox txtModelsPath;
         private Label lblStatus;
+        private Label lblMonState;
+        private Label lblMonCurrent;
+        private Label lblMonLast;
+        private Label lblMonTotals;
         private TextBox txtLog;
         private Button btnStart;
         private Button btnStop;
         private Button btnOpenLog;
         private Process adapterProcess;
         private bool closing;
+        private int runningPort;
+        private System.Windows.Forms.Timer monitorTimer;
+        private HttpClient metricsClient;
+        private bool pollingMetrics;
 
         public MainForm()
         {
@@ -57,9 +65,15 @@ namespace TradosAIBridgeAdapterGui
             Text = "Trados AI Bridge Adapter - 控制台";
             Font = new Font("Microsoft YaHei UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(760, 640);
-            Size = new Size(800, 700);
+            MinimumSize = new Size(760, 760);
+            Size = new Size(800, 820);
             AutoScaleMode = AutoScaleMode.Font;
+
+            metricsClient = new HttpClient();
+            metricsClient.Timeout = TimeSpan.FromSeconds(2);
+            monitorTimer = new System.Windows.Forms.Timer();
+            monitorTimer.Interval = 700;
+            monitorTimer.Tick += delegate { PollMetrics(); };
 
             BuildUi();
             LoadSettings();
@@ -276,6 +290,50 @@ namespace TradosAIBridgeAdapterGui
             lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(lblStatus);
 
+            GroupBox grpMonitor = new GroupBox();
+            grpMonitor.Text = "运行监控";
+            grpMonitor.Location = new Point(12, 382);
+            grpMonitor.Size = new Size(760, 100);
+            grpMonitor.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(grpMonitor);
+
+            lblMonState = new Label();
+            lblMonState.Text = "状态：已停止";
+            lblMonState.Location = new Point(15, 24);
+            lblMonState.Size = new Size(360, 20);
+            lblMonState.AutoEllipsis = true;
+            grpMonitor.Controls.Add(lblMonState);
+
+            lblMonTotals = new Label();
+            lblMonTotals.Text = "模型请求：0 · 成功 0 · 失败 0 · 平均 0.0 t/s";
+            lblMonTotals.Location = new Point(390, 24);
+            lblMonTotals.Size = new Size(355, 20);
+            lblMonTotals.AutoEllipsis = true;
+            lblMonTotals.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            grpMonitor.Controls.Add(lblMonTotals);
+
+            lblMonCurrent = new Label();
+            lblMonCurrent.Text = "当前请求：--";
+            lblMonCurrent.Location = new Point(15, 48);
+            lblMonCurrent.Size = new Size(360, 20);
+            lblMonCurrent.AutoEllipsis = true;
+            grpMonitor.Controls.Add(lblMonCurrent);
+
+            lblMonLast = new Label();
+            lblMonLast.Text = "最近请求：--";
+            lblMonLast.Location = new Point(390, 48);
+            lblMonLast.Size = new Size(355, 20);
+            lblMonLast.AutoEllipsis = true;
+            lblMonLast.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            grpMonitor.Controls.Add(lblMonLast);
+
+            Label lblMonHint = new Label();
+            lblMonHint.Text = "每 700 ms 刷新；t/s = 生成 token / 秒";
+            lblMonHint.ForeColor = Color.Gray;
+            lblMonHint.Location = new Point(15, 72);
+            lblMonHint.AutoSize = true;
+            grpMonitor.Controls.Add(lblMonHint);
+
             txtLog = new TextBox();
             txtLog.Multiline = true;
             txtLog.ReadOnly = true;
@@ -283,7 +341,7 @@ namespace TradosAIBridgeAdapterGui
             txtLog.WordWrap = false;
             txtLog.Font = new Font("Consolas", 9F);
             txtLog.BackColor = Color.White;
-            txtLog.Location = new Point(12, 380);
+            txtLog.Location = new Point(12, 492);
             txtLog.Size = new Size(760, 280);
             txtLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(txtLog);
@@ -317,6 +375,166 @@ namespace TradosAIBridgeAdapterGui
         {
             lblStatus.Text = text;
             lblStatus.ForeColor = error ? Color.Firebrick : Color.DarkGreen;
+        }
+
+        private void StartMonitoring(int port)
+        {
+            runningPort = port;
+            pollingMetrics = false;
+            lblMonState.Text = "状态：运行中（等待指标）";
+            lblMonCurrent.Text = "当前请求：等待中...";
+            lblMonCurrent.ForeColor = Color.DimGray;
+            lblMonLast.Text = "最近请求：--";
+            lblMonLast.ForeColor = Color.DimGray;
+            lblMonTotals.Text = "模型请求：0 · 成功 0 · 失败 0 · 平均 0.0 t/s";
+            monitorTimer.Start();
+        }
+
+        private void StopMonitoring()
+        {
+            if (monitorTimer != null) monitorTimer.Stop();
+            pollingMetrics = false;
+            if (lblMonState != null)
+            {
+                lblMonState.Text = "状态：已停止";
+                lblMonCurrent.Text = "当前请求：--";
+                lblMonCurrent.ForeColor = Color.DimGray;
+                lblMonLast.Text = "最近请求：--";
+                lblMonLast.ForeColor = Color.DimGray;
+                lblMonTotals.Text = "模型请求：0 · 成功 0 · 失败 0 · 平均 0.0 t/s";
+            }
+        }
+
+        private async void PollMetrics()
+        {
+            if (closing || IsDisposed) return;
+            if (adapterProcess == null || adapterProcess.HasExited)
+            {
+                StopMonitoring();
+                return;
+            }
+            if (pollingMetrics) return;
+            pollingMetrics = true;
+            try
+            {
+                string json = await metricsClient.GetStringAsync("http://127.0.0.1:" + runningPort + "/metrics");
+                if (closing || IsDisposed) return;
+                UpdateMonitor(json);
+            }
+            catch
+            {
+                if (!closing && !IsDisposed)
+                {
+                    lblMonState.Text = "状态：运行中（监控暂不可用）";
+                    lblMonCurrent.Text = "当前请求：--";
+                    lblMonCurrent.ForeColor = Color.DimGray;
+                }
+            }
+            finally
+            {
+                pollingMetrics = false;
+            }
+        }
+
+        private void UpdateMonitor(string json)
+        {
+            JavaScriptSerializer ser = new JavaScriptSerializer();
+            ser.MaxJsonLength = int.MaxValue;
+            Dictionary<string, object> root = ser.DeserializeObject(json) as Dictionary<string, object>;
+            if (root == null) return;
+
+            Dictionary<string, object> current = GetDict(root, "current");
+            Dictionary<string, object> last = GetDict(root, "last");
+            Dictionary<string, object> totals = GetDict(root, "totals");
+            double uptime = GetDouble(root, "uptimeSeconds");
+            int port = (int)GetDouble(root, "port");
+
+            lblMonState.Text = "状态：运行中 · 端口 " + port + " · 已运行 " + FormatUptime(uptime);
+
+            bool active = GetBool(current, "active");
+            double currentTps = GetDouble(current, "tokensPerSecond");
+            double currentElapsed = GetDouble(current, "elapsedSeconds");
+            long currentTokens = (long)GetDouble(current, "tokens");
+            if (active)
+            {
+                if (currentTps > 0)
+                {
+                    lblMonCurrent.Text = string.Format("当前请求：{0:F1} t/s · {1:F1}s · {2} tokens",
+                        currentTps, currentElapsed, currentTokens);
+                }
+                else
+                {
+                    lblMonCurrent.Text = string.Format("当前请求：预填充/等待中 · {0:F1}s", currentElapsed);
+                }
+                lblMonCurrent.ForeColor = Color.DarkGreen;
+            }
+            else
+            {
+                lblMonCurrent.Text = "当前请求：空闲";
+                lblMonCurrent.ForeColor = Color.DimGray;
+            }
+
+            string lastAt = GetString(last, "at");
+            if (string.IsNullOrEmpty(lastAt))
+            {
+                lblMonLast.Text = "最近请求：--";
+                lblMonLast.ForeColor = Color.DimGray;
+            }
+            else
+            {
+                bool lastOk = GetBool(last, "success");
+                lblMonLast.Text = string.Format("最近请求：{0:F1} t/s · {1} tokens · {2:F2}s{3}",
+                    GetDouble(last, "tokensPerSecond"),
+                    (long)GetDouble(last, "completionTokens"),
+                    GetDouble(last, "seconds"),
+                    lastOk ? "" : " · 失败");
+                lblMonLast.ForeColor = lastOk ? Color.DimGray : Color.Firebrick;
+            }
+
+            lblMonTotals.Text = string.Format("模型请求：{0} · 成功 {1} · 失败 {2} · 平均 {3:F1} t/s",
+                (long)GetDouble(totals, "requests"),
+                (long)GetDouble(totals, "success"),
+                (long)GetDouble(totals, "failed"),
+                GetDouble(totals, "tokensPerSecond"));
+        }
+
+        private static Dictionary<string, object> GetDict(Dictionary<string, object> root, string key)
+        {
+            object value;
+            if (root != null && root.TryGetValue(key, out value)) return value as Dictionary<string, object>;
+            return null;
+        }
+
+        private static double GetDouble(Dictionary<string, object> root, string key)
+        {
+            object value;
+            if (root == null || !root.TryGetValue(key, out value) || value == null) return 0;
+            double result;
+            if (double.TryParse(Convert.ToString(value), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out result)) return result;
+            return 0;
+        }
+
+        private static bool GetBool(Dictionary<string, object> root, string key)
+        {
+            object value;
+            if (root == null || !root.TryGetValue(key, out value) || value == null) return false;
+            if (value is bool) return (bool)value;
+            bool result;
+            return bool.TryParse(Convert.ToString(value), out result) && result;
+        }
+
+        private static string GetString(Dictionary<string, object> root, string key)
+        {
+            object value;
+            if (root != null && root.TryGetValue(key, out value) && value != null) return Convert.ToString(value);
+            return "";
+        }
+
+        private static string FormatUptime(double seconds)
+        {
+            TimeSpan time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+            return string.Format("{0:00}:{1:00}:{2:00}", (int)time.TotalHours, time.Minutes, time.Seconds);
         }
 
         private void UpdateButtons()
@@ -515,6 +733,7 @@ namespace TradosAIBridgeAdapterGui
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
                 adapterProcess = process;
+                StartMonitoring((int)numPort.Value);
 
                 SaveSettings(false);
                 UpdateButtons();
@@ -542,6 +761,7 @@ namespace TradosAIBridgeAdapterGui
                 BeginInvoke(new Action(delegate
                 {
                     if (adapterProcess == process) adapterProcess = null;
+                    StopMonitoring();
                     UpdateButtons();
                     SetStatus("适配器已停止", false);
                     AppendLog("适配器已停止。");
@@ -556,6 +776,7 @@ namespace TradosAIBridgeAdapterGui
             if (process == null || process.HasExited)
             {
                 adapterProcess = null;
+                StopMonitoring();
                 UpdateButtons();
                 return;
             }
@@ -570,6 +791,7 @@ namespace TradosAIBridgeAdapterGui
                 AppendLog("停止失败：" + ex.Message);
             }
             adapterProcess = null;
+            StopMonitoring();
             UpdateButtons();
             SetStatus("适配器已停止", false);
             if (userInitiated) AppendLog("适配器已停止。");
@@ -722,11 +944,13 @@ namespace TradosAIBridgeAdapterGui
                 }
             }
             closing = true;
+            if (monitorTimer != null) monitorTimer.Stop();
             SaveSettings(false);
             if (adapterProcess != null && !adapterProcess.HasExited)
             {
                 try { adapterProcess.Kill(); } catch { }
             }
+            try { metricsClient.Dispose(); } catch { }
         }
     }
 

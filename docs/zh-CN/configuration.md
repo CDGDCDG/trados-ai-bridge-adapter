@@ -18,6 +18,7 @@
 | 使用 Authorization Bearer API Key | 上游需要鉴权时勾选并填写 |
 | 引擎 | 自动识别 / TranslateGemma / Hy-MT2 |
 | 标签模式 | quality（译文优先）/ preserve（标签优先） |
+| 运行监控 | 当前/最近请求 t/s、耗时、token 数、累计请求与平均 t/s |
 
 ### 操作流程
 
@@ -26,8 +27,32 @@
 3. 选择模型；如果列表为空，可手动输入模型 id/路径。
 4. 需要时勾选 API Key 并输入。
 5. 点 **启动适配器**。
-6. 把界面显示的 **Endpoint** / **Models path** 复制到 AI Bridge。
-7. 使用完毕后点 **停止适配器**，再关闭 GUI。
+6. 在 **运行监控** 面板查看当前请求的 t/s、耗时和 token 数。
+7. 把界面显示的 **Endpoint** / **Models path** 复制到 AI Bridge。
+8. 使用完毕后点 **停止适配器**，再关闭 GUI。
+
+### 运行监控
+
+GUI 每 700 ms 读取一次适配器的：
+
+```text
+GET http://127.0.0.1:<监听端口>/metrics
+```
+
+显示内容：
+
+- **状态**：运行中/已停止、端口、运行时长
+- **当前请求**：实时 t/s、已耗时、已生成 token 数
+- **最近请求**：t/s、completion token 数、耗时、成功/失败
+- **累计**：模型请求数、成功数、失败数、平均 t/s
+
+说明：
+
+- 适配器向上游请求流式响应；生成过程中 token 数会持续增加。
+- 最近请求的 t/s 优先使用 llama-server 的 `timings.predicted_per_second`。
+- 当前 t/s 按流式 chunk 估算，生成初期可能波动。
+- 统计的是模型请求数，不是 Trados segment 数；标签重试可能增加请求数。
+- `/metrics` 只监听回环地址，无鉴权。
 
 ### 设置与安全
 

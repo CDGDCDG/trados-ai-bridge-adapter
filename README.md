@@ -103,6 +103,8 @@ The adapter also proxies `GET /v1/models`, answers the AI Bridge connection test
 
 - WinForms GUI for upstream URL, port, model, engine, tags, and optional Bearer API key
 - GUI start/stop, live adapter logs, model discovery, encrypted API-key storage
+- Live monitoring: active request t/s, elapsed time, token counts, last request, totals
+- `/metrics` HTTP endpoint for current and cumulative throughput
 - Single-segment `[SOURCE]` and batch `[SEGMENTS]` requests
 - CRLF- and LF-safe prompt parsing
 - TranslateGemma engine:
@@ -164,10 +166,33 @@ The build uses:
    - **引擎**: auto / TranslateGemma / Hy-MT2
    - **标签模式**: quality / preserve
 4. Click **启动适配器**. The GUI starts `AIBridgeAdapter.exe` and streams its log.
-5. Copy the displayed **Endpoint** / **Models path** into Trados AI Bridge.
-6. Click **停止适配器** before closing the GUI.
+5. Watch the **运行监控** panel: current t/s, elapsed time, tokens, last request, and totals update every 700 ms.
+6. Copy the displayed **Endpoint** / **Models path** into Trados AI Bridge.
+7. Click **停止适配器** before closing the GUI.
 
 The GUI stores settings in `gui-settings.json`; the API key is encrypted with Windows DPAPI (current user). The key is passed to the adapter through an environment variable, not the command line.
+
+### Monitoring
+
+The adapter exposes:
+
+```text
+GET http://127.0.0.1:9932/metrics
+```
+
+The GUI polls this endpoint every 700 ms. It reports:
+
+- `current`: whether a model request is active, elapsed seconds, generated tokens, live t/s
+- `last`: last request's t/s, prompt/completion tokens, duration, success/error
+- `totals`: model requests, successes, failures, average t/s
+
+Notes:
+
+- The adapter requests a streaming response from llama-server, so the GUI can update while tokens are generated.
+- `last.tokensPerSecond` uses llama-server's `timings.predicted_per_second` when available.
+- `current.tokensPerSecond` is chunk-based and therefore approximate; it becomes stable as generation proceeds.
+- Counts are **model calls**, not Trados segments. Tag retries can make the count larger than the segment count.
+- `/metrics` has no authentication and is bound to loopback.
 
 ### Manual setup
 
@@ -329,6 +354,7 @@ Inline XML tags are checked after translation.
 - Hy-MT2-7B Q6_K GGUF
 - Hy-MT2-30B-A3B Q6_K GGUF (community quantization)
 - WinForms GUI: model discovery, start/stop, encrypted Bearer key, live logs
+- Live monitoring verified during 7B Q6_K translation (current t/s, last request, averages)
 - Windows 11, .NET Framework 4.8
 
 The CRLF fix was verified against a real AI Bridge request:

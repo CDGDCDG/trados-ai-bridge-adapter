@@ -12,7 +12,7 @@
 
 程序监听 `127.0.0.1:9932`，把 AI Bridge 的请求转换成模型真正需要的格式，再转发给 `127.0.0.1:9931` 的 `llama-server`，最后按 AI Bridge 要求返回 `TransUnits` JSON。
 
-附带 WinForms 图形界面：可配置上游 API 地址、监听端口、模型、引擎、标签模式、可选 Bearer API Key，并支持启动/停止和实时日志。
+附带 WinForms 图形界面：可配置上游 API 地址、监听端口、模型、引擎、标签模式、可选 Bearer API Key，并支持启动/停止、实时日志和 t/s 运行监控。
 
 > 与 RWS、Google、腾讯无隶属关系，使用风险自负。
 
@@ -136,10 +136,33 @@ build.cmd
    - **引擎**：自动识别 / TranslateGemma / Hy-MT2
    - **标签模式**：quality / preserve
 4. 点击 **启动适配器**。GUI 会在后台启动 `AIBridgeAdapter.exe` 并显示日志。
-5. 把界面上的 **Endpoint** / **Models path** 复制到 Trados AI Bridge。
-6. 关闭 GUI 前先点 **停止适配器**。
+5. 在 **运行监控** 面板查看当前请求的 t/s、耗时、token 数，以及最近请求和累计平均。
+6. 把界面上的 **Endpoint** / **Models path** 复制到 Trados AI Bridge。
+7. 关闭 GUI 前先点 **停止适配器**。
 
 设置保存在 `gui-settings.json`；API Key 使用 Windows DPAPI（当前用户）加密，子进程通过环境变量接收，不出现在命令行里。
+
+### 运行监控
+
+适配器提供：
+
+```text
+GET http://127.0.0.1:9932/metrics
+```
+
+GUI 每 700 ms 读取一次，显示：
+
+- **当前请求**：是否有请求进行中、已耗时、已生成 token 数、实时 t/s
+- **最近请求**：t/s、prompt/completion token 数、耗时、成功/失败
+- **累计**：模型请求数、成功数、失败数、平均 t/s
+
+说明：
+
+- 适配器会向上游请求流式响应，因此生成过程中就能看到 tokens 增长。
+- 最近请求的 t/s 优先使用 llama-server 的 `timings.predicted_per_second`。
+- 当前 t/s 按流式 chunk 估算，生成过程中会逐渐稳定。
+- 统计的是**模型请求数**，不是 Trados segment 数；标签重试可能让请求数大于段数。
+- `/metrics` 只绑定回环地址，没有鉴权。
 
 ### 方式 B：命令行
 
@@ -275,6 +298,7 @@ GUI 会自动传递这些参数，并通过环境变量传递 API Key，避免�
 - Hy-MT2-7B Q6_K
 - Hy-MT2-30B-A3B Q6_K（社区量化版）
 - WinForms GUI：模型刷新、启动/停止、加密 Bearer Key、实时日志
+- 运行监控：7B Q6_K 翻译过程中验证当前 t/s、最近请求与平均 t/s
 - Windows 11 + .NET Framework 4.8
 
 CRLF 修复用真实 AI Bridge 请求验证：

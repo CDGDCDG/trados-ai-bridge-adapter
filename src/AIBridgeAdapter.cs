@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -39,6 +40,130 @@ namespace TradosAIBridgeAdapter
         public bool RightSpace;
         public bool LeftBracket;
         public bool RightBracket;
+    }
+
+    internal static class Metrics
+    {
+        private static readonly object sync = new object();
+        private static readonly DateTime startedAt = DateTime.UtcNow;
+        private static int activeRequests;
+        private static long totalRequests;
+        private static long successRequests;
+        private static long failedRequests;
+        private static long totalPromptTokens;
+        private static long totalCompletionTokens;
+        private static double totalSeconds;
+        private static long lastPromptTokens;
+        private static long lastCompletionTokens;
+        private static double lastSeconds;
+        private static double lastTokensPerSecond;
+        private static bool lastSuccess;
+        private static string lastAt = "";
+        private static string lastError = "";
+        private static long currentStartedTicks;
+        private static long currentTokens;
+
+        public static void BeginRequest()
+        {
+            lock (sync)
+            {
+                activeRequests++;
+                totalRequests++;
+                currentStartedTicks = DateTime.UtcNow.Ticks;
+                currentTokens = 0;
+            }
+        }
+
+        public static void AddToken()
+        {
+            lock (sync) { currentTokens++; }
+        }
+
+        public static long GetCurrentTokens()
+        {
+            lock (sync) { return currentTokens; }
+        }
+
+        public static void EndRequest(bool success, long promptTokens, long completionTokens, double seconds, double tokensPerSecond, string error)
+        {
+            lock (sync)
+            {
+                if (activeRequests > 0) activeRequests--;
+                if (success) successRequests++; else failedRequests++;
+                if (seconds <= 0) seconds = 0.001;
+                lastPromptTokens = promptTokens;
+                lastCompletionTokens = completionTokens;
+                lastSeconds = seconds;
+                lastTokensPerSecond = tokensPerSecond;
+                lastSuccess = success;
+                lastAt = DateTime.Now.ToString("HH:mm:ss");
+                lastError = Trim(error, 240);
+                if (success)
+                {
+                    totalPromptTokens += promptTokens;
+                    totalCompletionTokens += completionTokens;
+                    totalSeconds += seconds;
+                }
+                currentTokens = 0;
+            }
+        }
+
+        public static string ToJson(int port, string engine, string model)
+        {
+            lock (sync)
+            {
+                double uptime = (DateTime.UtcNow - startedAt).TotalSeconds;
+                double currentElapsed = 0;
+                double currentTps = 0;
+                if (activeRequests > 0 && currentStartedTicks > 0)
+                {
+                    currentElapsed = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - currentStartedTicks).TotalSeconds;
+                    if (currentElapsed > 0.2) currentTps = currentTokens / currentElapsed;
+                }
+                double averageTps = totalSeconds > 0 ? totalCompletionTokens / totalSeconds : 0;
+
+                Dictionary<string, object> current = new Dictionary<string, object>();
+                current["active"] = activeRequests > 0;
+                current["elapsedSeconds"] = Math.Round(currentElapsed, 2);
+                current["tokens"] = currentTokens;
+                current["tokensPerSecond"] = Math.Round(currentTps, 2);
+
+                Dictionary<string, object> last = new Dictionary<string, object>();
+                last["success"] = lastSuccess;
+                last["promptTokens"] = lastPromptTokens;
+                last["completionTokens"] = lastCompletionTokens;
+                last["seconds"] = Math.Round(lastSeconds, 2);
+                last["tokensPerSecond"] = Math.Round(lastTokensPerSecond, 2);
+                last["at"] = lastAt;
+                last["error"] = lastError;
+
+                Dictionary<string, object> totals = new Dictionary<string, object>();
+                totals["requests"] = totalRequests;
+                totals["success"] = successRequests;
+                totals["failed"] = failedRequests;
+                totals["promptTokens"] = totalPromptTokens;
+                totals["completionTokens"] = totalCompletionTokens;
+                totals["seconds"] = Math.Round(totalSeconds, 2);
+                totals["tokensPerSecond"] = Math.Round(averageTps, 2);
+
+                Dictionary<string, object> root = new Dictionary<string, object>();
+                root["running"] = true;
+                root["uptimeSeconds"] = Math.Round(uptime, 0);
+                root["port"] = port;
+                root["engine"] = engine;
+                root["model"] = model;
+                root["current"] = current;
+                root["last"] = last;
+                root["totals"] = totals;
+                return new JavaScriptSerializer().Serialize(root);
+            }
+        }
+
+        private static string Trim(string value, int max)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            return value.Length <= max ? value : value.Substring(0, max) + "...";
+        }
     }
 
     internal static class Program
@@ -196,6 +321,10 @@ namespace TradosAIBridgeAdapter
                     if (method == "GET" && (path == "/" || path == "/health"))
                     {
                         WriteJson(stream, 200, "{\"status\":\"ok\",\"upstream\":" + JsonEscape(upstream) + "}");
+                    }
+                    else if (method == "GET" && (path == "/metrics" || path == "/status"))
+                    {
+                        WriteJson(stream, 200, Metrics.ToJson(listenPort, engine, modelId));
                     }
                     else if (method == "GET" && path.StartsWith("/v1/models", StringComparison.OrdinalIgnoreCase))
                     {
@@ -444,42 +573,164 @@ namespace TradosAIBridgeAdapter
                 maxTokens = Math.Min(8192, Math.Max(512, text.Length * 4 + 256));
             }
             payload["max_tokens"] = maxTokens;
-            payload["stream"] = false;
+            payload["stream"] = true;
+            payload["stream_options"] = new Dictionary<string, object>
+            {
+                { "include_usage", true }
+            };
 
             string json = ser.Serialize(payload);
             if (debug) DebugLog("UPSTREAM REQUEST " + json);
 
-            using (StringContent content = new StringContent(json, Encoding.UTF8, "application/json"))
+            Metrics.BeginRequest();
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            bool metricsClosed = false;
+            try
             {
-                HttpResponseMessage response = http.PostAsync(upstream + "/v1/chat/completions", content).Result;
-                string responseBody = response.Content.ReadAsStringAsync().Result;
-                if (debug) DebugLog("UPSTREAM RESPONSE " + (int)response.StatusCode + " " + responseBody);
-                if (!response.IsSuccessStatusCode)
+                using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, upstream + "/v1/chat/completions"))
+                using (StringContent content = new StringContent(json, Encoding.UTF8, "application/json"))
                 {
-                    throw new InvalidOperationException("HTTP " + (int)response.StatusCode + " " + Trim(responseBody, 500));
-                }
+                    request.Content = content;
+                    HttpResponseMessage response = http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).Result;
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        string errorBody = response.Content.ReadAsStringAsync().Result;
+                        throw new InvalidOperationException("HTTP " + (int)response.StatusCode + " " + Trim(errorBody, 500));
+                    }
 
-                Dictionary<string, object> result = ser.DeserializeObject(responseBody) as Dictionary<string, object>;
-                if (result == null || !result.ContainsKey("choices")) throw new InvalidOperationException("Unexpected upstream response: " + Trim(responseBody, 500));
-                object[] choices = result["choices"] as object[];
-                if (choices == null || choices.Length == 0) throw new InvalidOperationException("Upstream returned no choices: " + Trim(responseBody, 500));
-                Dictionary<string, object> choice = choices[0] as Dictionary<string, object>;
-                if (choice == null) throw new InvalidOperationException("Unexpected upstream choice.");
+                    StringBuilder translated = new StringBuilder();
+                    long promptTokens = 0;
+                    long completionTokens = 0;
+                    long chunkCount = 0;
+                    double reportedTps = 0;
+                    string finishReason = "";
+                    bool sawData = false;
+                    bool usagePromptSeen = false;
+                    bool usageCompletionSeen = false;
 
-                string finishReason = choice.ContainsKey("finish_reason") ? Convert.ToString(choice["finish_reason"]) : "";
-                string translated = null;
-                Dictionary<string, object> message = choice.ContainsKey("message") ? choice["message"] as Dictionary<string, object> : null;
-                if (message != null && message.ContainsKey("content") && message["content"] != null)
-                {
-                    translated = Convert.ToString(message["content"]);
+                    using (Stream responseStream = response.Content.ReadAsStreamAsync().Result)
+                    using (StreamReader reader = new StreamReader(responseStream, Encoding.UTF8))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            if (line.Length == 0) continue;
+                            if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
+                            string data = line.Substring(5).Trim();
+                            if (data.Length == 0) continue;
+                            if (data == "[DONE]") break;
+
+                            Dictionary<string, object> chunk = null;
+                            try { chunk = ser.DeserializeObject(data) as Dictionary<string, object>; }
+                            catch { continue; }
+                            if (chunk == null) continue;
+                            sawData = true;
+
+                            if (chunk.ContainsKey("usage") && chunk["usage"] != null)
+                            {
+                                Dictionary<string, object> usage = chunk["usage"] as Dictionary<string, object>;
+                                if (usage != null)
+                                {
+                                    if (usage.ContainsKey("prompt_tokens"))
+                                    {
+                                        long.TryParse(Convert.ToString(usage["prompt_tokens"]), out promptTokens);
+                                        usagePromptSeen = true;
+                                    }
+                                    if (usage.ContainsKey("completion_tokens"))
+                                    {
+                                        long.TryParse(Convert.ToString(usage["completion_tokens"]), out completionTokens);
+                                        usageCompletionSeen = true;
+                                    }
+                                }
+                            }
+
+                            if (chunk.ContainsKey("timings") && chunk["timings"] != null)
+                            {
+                                Dictionary<string, object> timings = chunk["timings"] as Dictionary<string, object>;
+                                if (timings != null)
+                                {
+                                    if (timings.ContainsKey("predicted_per_second"))
+                                    {
+                                        double.TryParse(Convert.ToString(timings["predicted_per_second"]),
+                                            NumberStyles.Float, CultureInfo.InvariantCulture, out reportedTps);
+                                    }
+                                    long value;
+                                    if (!usagePromptSeen && timings.ContainsKey("prompt_n")
+                                        && long.TryParse(Convert.ToString(timings["prompt_n"]), out value)) promptTokens = value;
+                                    if (!usageCompletionSeen && timings.ContainsKey("predicted_n")
+                                        && long.TryParse(Convert.ToString(timings["predicted_n"]), out value)) completionTokens = value;
+                                }
+                            }
+
+                            object[] choices = chunk.ContainsKey("choices") ? chunk["choices"] as object[] : null;
+                            if (choices == null || choices.Length == 0) continue;
+                            Dictionary<string, object> choice = choices[0] as Dictionary<string, object>;
+                            if (choice == null) continue;
+
+                            if (choice.ContainsKey("finish_reason") && choice["finish_reason"] != null)
+                            {
+                                finishReason = Convert.ToString(choice["finish_reason"]);
+                            }
+
+                            Dictionary<string, object> delta = choice.ContainsKey("delta")
+                                ? choice["delta"] as Dictionary<string, object> : null;
+                            if (delta != null && delta.ContainsKey("content") && delta["content"] != null)
+                            {
+                                string piece = Convert.ToString(delta["content"]);
+                                if (piece.Length > 0)
+                                {
+                                    translated.Append(piece);
+                                    chunkCount++;
+                                    Metrics.AddToken();
+                                }
+                            }
+                            else
+                            {
+                                Dictionary<string, object> message = choice.ContainsKey("message")
+                                    ? choice["message"] as Dictionary<string, object> : null;
+                                if (message != null && message.ContainsKey("content") && message["content"] != null)
+                                {
+                                    string piece = Convert.ToString(message["content"]);
+                                    if (piece.Length > 0)
+                                    {
+                                        translated.Append(piece);
+                                        chunkCount++;
+                                        Metrics.AddToken();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!sawData || translated.Length == 0)
+                    {
+                        throw new InvalidOperationException("Upstream returned no streaming translation text.");
+                    }
+
+                    if (completionTokens <= 0) completionTokens = chunkCount;
+                    double seconds = stopwatch.Elapsed.TotalSeconds;
+                    double tps = reportedTps > 0
+                        ? reportedTps
+                        : (seconds > 0 ? completionTokens / seconds : 0);
+                    Metrics.EndRequest(true, promptTokens, completionTokens, seconds, tps, "");
+                    metricsClosed = true;
+
+                    if (debug)
+                    {
+                        DebugLog("UPSTREAM STREAM tokens=" + completionTokens + " tps=" + Math.Round(tps, 2)
+                                 + " text=" + Trim(translated.ToString(), 2000));
+                    }
+                    if (finishReason == "length") Log("WARN upstream hit max_tokens (" + maxTokens + ").");
+                    return translated.ToString().Trim();
                 }
-                if (translated == null && choice.ContainsKey("text"))
+            }
+            catch (Exception ex)
+            {
+                if (!metricsClosed)
                 {
-                    translated = Convert.ToString(choice["text"]);
+                    Metrics.EndRequest(false, 0, 0, stopwatch.Elapsed.TotalSeconds, 0, ex.Message);
                 }
-                if (translated == null) throw new InvalidOperationException("Upstream response contains no translation text.");
-                if (finishReason == "length") Log("WARN upstream hit max_tokens (" + maxTokens + ").");
-                return translated.Trim();
+                throw;
             }
         }
 
