@@ -1,5 +1,8 @@
 # Trados AI Bridge Adapter
 
+**语言：** [English](README.md) | [简体中文](README.zh-CN.md)  
+**中文文档：** [配置指南](docs/zh-CN/configuration.md) | [故障排查](docs/zh-CN/troubleshooting.md)
+
 一个本地 OpenAI 兼容适配器，让 **llama.cpp / LM Studio 承载的翻译模型**稳定接入 **Trados Studio AI Bridge**。
 
 目前支持两类模型：
@@ -62,6 +65,22 @@ Hy-MT2 需要完整语言名和翻译指令，例如：
 ```
 
 源语言和目标语言都不涉及中文时使用英文指令。适配器会自动拼接术语、上下文和自定义风格要求。
+
+---
+
+## 模型下载
+
+TranslateGemma：
+
+- 模型卡：https://huggingface.co/google/translategemma-4b-it
+- 集合：https://huggingface.co/collections/google/translategemma
+
+Hy-MT2：
+
+- 官方仓库：https://github.com/Tencent-Hunyuan/Hy-MT2
+- Hugging Face 集合：https://huggingface.co/collections/tencent/hy-mt2
+
+建议：8 GB 显存优先 7B Q4_K_M / Q5_K_M；12B、30B 通常需要更强显卡或 CPU/GPU 混合。
 
 ---
 
@@ -223,6 +242,7 @@ start-auto.bat
 - Trados Studio 2026 AI Bridge 1.0.0.0
 - LM Studio CUDA 后端 2.62.0 / llama-server
 - TranslateGemma 4B IT Q4_K_S
+- Hy-MT2-7B Q6_K
 - Hy-MT2-30B-A3B Q6_K（社区量化版）
 - Windows 11 + .NET Framework 4.8
 
@@ -230,6 +250,41 @@ CRLF 修复用真实 AI Bridge 请求验证：
 
 - 修复前：提取 356 字符，输出包含 `[USER_PROMPT]`、`[COMMENT_PROMPT]`
 - 修复后：提取 141 字符，只输出译文
+
+---
+
+## 常见问题
+
+### 输出里有 `[USER_PROMPT]` / `[COMMENT_PROMPT]`
+
+这是 v1.0.0 及更早版本的 CRLF 解析问题。升级到 v1.0.1 或更新版本，并重启适配器。详见[故障排查](docs/zh-CN/troubleshooting.md)。
+
+### 术语不生效
+
+确认使用的是 Hy-MT2，并在 AI Bridge 中启用了术语表。TranslateGemma 不支持术语。详见[故障排查](docs/zh-CN/troubleshooting.md)。
+
+### 标签丢失
+
+默认 `--tags quality` 会优先保证译文自然，必要时丢弃标签并在 Comment 说明；需要强制保留时使用 `--tags preserve`。详见[故障排查](docs/zh-CN/troubleshooting.md)。
+
+### 模型加载失败或速度慢
+
+先确认 llama.cpp 构建与模型匹配，再调整量化、`--n-gpu-layers` 和 `--ctx-size`。详见[故障排查](docs/zh-CN/troubleshooting.md)。
+
+---
+
+## 目录结构
+
+```text
+src/AIBridgeAdapter.cs          适配器源码
+build.cmd                       .NET Framework 编译脚本
+start-gemma.bat                 TranslateGemma 模式
+start-hymt2.bat                 Hy-MT2 模式
+start-auto.bat                  自动识别模型
+samples/                        合成测试请求
+docs/zh-CN/configuration.md     中文配置指南
+docs/zh-CN/troubleshooting.md   中文故障排查
+```
 
 ---
 

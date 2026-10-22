@@ -1,0 +1,235 @@
+# 中文故障排查
+
+按现象查找。每条都给出原因、检查和修复方法。
+
+---
+
+## 1. 译文里出现 `[USER_PROMPT]` 或 `[COMMENT_PROMPT]`
+
+**版本 1.0.0 及更早版本的已知问题。**
+
+原因：AI Bridge 使用 CRLF（`\r\n`）换行；旧正则只用 `$` 结尾，没有停在 `[USER_PROMPT]`，把后面的提示词也当成原文发给了模型。
+
+检查 `bridge.log`：
+
+```text
+OK   single chars=356 ...
+```
+
+如果字符数明显大于原文（例如原文只有 141 字符），就是这个问题。
+
+修复：
+
+1. 升级到 v1.0.1 或更新版本。
+2. 停止旧的适配器进程，替换 `AIBridgeAdapter.exe`。
+3. 重启适配器，再翻译同一条。
+
+正确日志应为：
+
+```text
+OK   single chars=141 ...
+```
+
+如果仍然出现，确认 AI Bridge 的 Endpoint 是 `http://127.0.0.1:9932/v1/`，而不是直接指向 `9931`。
+
+---
+
+## 2. 输出是整段英文提示词，或模型在“解释”提示词
+
+可能原因：
+
+- AI Bridge 连接直接指向了 `llama-server`（9931），没有经过适配器。
+- 适配器用了错误的引擎（例如 Hy-MT2 模型仍以 `gemma` 模式运行）。
+- llama-server 没有使用模型自己的模板。
+
+检查：
+
+1. 打开 `http://127.0.0.1:9932/health`，确认适配器在运行。
+2. 看适配器启动日志：
+
+```text
+Engine : hymt2 (Hy-MT2 full-name prompt)
+```
+
+3. 看 `http://127.0.0.1:9931/v1/models` 是否是当前模型。
+4. 确认 `llama-server` 启动了 `--jinja`。
+5. Hy-MT2 不要复用 TranslateGemma 的 `--chat-template-file`。
+
+修复：
+
+```bat
+start-hymt2.bat
+```
+
+或：
+
+```bat
+AIBridgeAdapter.exe --engine hymt2
+```
+
+---
+
+## 3. Test Connection 失败
+
+检查顺序：
+
+1. `http://127.0.0.1:9932/health` 是否返回 `{"status":"ok",...}`。
+2. `http://127.0.0.1:9931/v1/models` 是否能打开。
+3. AI Bridge Endpoint 是否是 `http://127.0.0.1:9932/v1/`。
+4. 适配器窗口是否报端口占用。
+5. 是否同时开了多个适配器实例。
+
+端口被占用时：
+
+```bat
+AIBridgeAdapter.exe --port 9934
+```
+
+然后把 AI Bridge Endpoint 改成 `http://127.0.0.1:9934/v1/`。
+
+---
+
+## 4. 译文为空
+
+可能原因：
+
+- 上游模型没有正确生成。
+- `llama-server` 模板错误。
+- 模型上下文/显存不足。
+- 适配器返回了错误，但 AI Bridge 没有显示。
+
+检查：
+
+- `bridge.log` 是否有 `FAIL`。
+- `bridge-debug.log`（用 `--debug` 启动）里的上游响应。
+- `llama-server` 控制台是否有 OOM、template error、context overflow。
+
+修复：
+
+- 降低 `--ctx-size` 或 `--n-gpu-layers`。
+- 确认模型文件和模板匹配。
+- 用短句测试，排除超长输入。
+
+---
+
+## 5. 术语没有生效
+
+先确认：
+
+- AI Bridge 中是否启用了术语表/术语提供程序。
+- 只有 **Hy-MT2** 模式会使用术语；TranslateGemma 不支持术语。
+- `[TERMS]` 是否真的出现在请求里。
+
+适配器支持这些格式：
+
+```text
+Source: 对象型号
+Target: 対象機種
+Status: Preferred
+```
+
+```text
+对象型号 => 対象機種
+```
+
+以及 JSON 对象/数组。`forbidden` / `deprecated` 会被跳过。
+
+如果格式不同：
+
+1. 用 `--debug` 启动。
+2. 在 `bridge-debug.log` 里找到发给上游的 prompt。
+3. 检查 `参考下面的翻译` / `Reference the following translations` 段。
+4. 提交 issue 时附上**脱敏后的** `[TERMS]` 片段。
+
+---
+
+## 6. 内联标签丢失
+
+这是模型能力问题，不一定是适配器错误。
+
+- 默认 `--tags quality`：标签丢失时保留自然译文，并在 Comment 中说明。
+- `--tags preserve`：用 token 强制保护标签，但可能影响措辞。
+- `<Locked...>` 内容在两种模式下都不会被翻译。
+
+建议先用实际文档做 A/B 测试，再决定模式。
+
+---
+
+## 7. `{0}`、`%s` 等占位符丢失
+
+1. 确认使用 v1.0.1 或更新版本。
+2. 查看 `bridge.log` 是否有 `WARN` 或 `FAIL`。
+3. 用一条只含占位符的短句测试：
+
+```text
+系统将在 {0} 秒后关闭，请保存文件 %s。
+```
+
+正常情况下应完整保留 `{0}` 和 `%s`。
+
+如果仍丢失，附上脱敏后的原文和输出提交 issue。
+
+---
+
+## 8. 速度很慢或显存不足
+
+- 7B Q4_K_M 通常比 12B/30B 更适合 8 GB 显存。
+- 降低 `--n-gpu-layers` 可以减少 OOM，但速度会下降。
+- 降低 `--ctx-size` 可以节省 KV cache。
+- 关闭其他占用显存的程序。
+- 批量翻译是逐段请求，段数越多耗时越长。
+- 30B-A3B 在 8 GB 显存上通常需要 CPU/GPU 混合，速度会明显变慢。
+
+---
+
+## 9. 模型加载失败
+
+检查：
+
+- 模型文件是否完整。
+- llama.cpp 版本是否支持该模型架构/量化。
+- Hy-MT2 的部分 GGUF 需要特定构建或 STQ 内核支持。
+- 显存/内存是否足够。
+- 是否错误地加载了 TranslateGemma 的模板文件。
+
+先用官方推荐的 llama.cpp 构建和最小参数测试模型本身，再接入适配器。
+
+---
+
+## 10. Refinement 模式报错
+
+适配器只支持 **Translate** 模式。
+
+如果 AI Bridge 使用 Refinement，会返回 HTTP 400。请在 AI Bridge 中切换到 Translate。
+
+---
+
+## 11. 中文乱码
+
+- 用 `chcp 65001` 切到 UTF-8。
+- 不要把日志/配置文件用错误的编码另存。
+- 适配器内部使用 UTF-8 JSON。
+
+`start-*.bat` 已经包含：
+
+```bat
+chcp 65001 >nul
+```
+
+---
+
+## 12. 提交 issue 时请附上
+
+- 适配器版本（`v1.0.1` 等）
+- 引擎（gemma / hymt2）
+- 模型名称与量化
+- `llama-server` 启动参数
+- `bridge.log` 最后 20 行
+- 脱敏后的请求/输出片段
+
+**不要上传：**
+
+- 完整 Trados 项目或术语库
+- 私人文档原文
+- `bridge.log` / `bridge-debug.log` 原文件
+- 任何 API key、路径中的用户名

@@ -1,5 +1,8 @@
 # Trados AI Bridge Adapter
 
+**Languages:** [English](README.md) | [简体中文](README.zh-CN.md)  
+**中文文档：** [配置指南](docs/zh-CN/configuration.md) | [故障排查](docs/zh-CN/troubleshooting.md)
+
 A small local OpenAI-compatible adapter that makes **llama.cpp / LM Studio-hosted translation models** work reliably with **Trados Studio AI Bridge**.
 
 It was built for two model families:
@@ -302,15 +305,26 @@ The CRLF fix was verified against a real AI Bridge request:
 
 ---
 
+## Documentation
+
+- [English README](README.md)
+- [简体中文 README](README.zh-CN.md)
+- [中文配置指南](docs/zh-CN/configuration.md)
+- [中文故障排查](docs/zh-CN/troubleshooting.md)
+
+---
+
 ## Repository layout
 
 ```text
-src/AIBridgeAdapter.cs   adapter source
-build.cmd                compile with .NET Framework csc
-start-gemma.bat          run in TranslateGemma mode
-start-hymt2.bat          run in Hy-MT2 mode
-start-auto.bat           auto-detect engine from /v1/models
-samples/                 synthetic AI Bridge request examples
+src/AIBridgeAdapter.cs          adapter source
+build.cmd                       compile with .NET Framework csc
+start-gemma.bat                 run in TranslateGemma mode
+start-hymt2.bat                 run in Hy-MT2 mode
+start-auto.bat                  auto-detect engine from /v1/models
+samples/                        synthetic AI Bridge request examples
+docs/zh-CN/configuration.md     Chinese configuration guide
+docs/zh-CN/troubleshooting.md   Chinese troubleshooting guide
 ```
 
 ---
