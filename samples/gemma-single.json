@@ -1,0 +1,14 @@
+{
+  "model": "translategemma",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a Translation Assistant. Translate the [SOURCE] and return the JSON schema."
+    },
+    {
+      "role": "user",
+      "content": "Translate the [SOURCE] from zh-CN to ja-JP.\r\n\r\n[SOURCE]\r\n<TagPair2>对象型号</TagPair2>：示例产品（P）\r\n\r\n[USER_PROMPT]\r\nProduce a natural, accurate translation suitable for general use.\r\n\r\n[COMMENT_PROMPT]\r\nInclude a brief explanation of the translation choices."
+    }
+  ],
+  "stream": false
+}

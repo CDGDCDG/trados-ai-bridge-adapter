@@ -1,0 +1,10 @@
+{
+  "model": "hymt2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Translate every segment in [SEGMENTS] from zh-CN to ja-JP. Return one TransUnit per segment, echoing its id.\r\n\r\n[CONTEXT]\r\n这是产品说明书的上一段，仅用于参考。\r\n\r\n[SEGMENTS]\r\n=== id: 1 ===\r\n<TagPair2>对象型号</TagPair2>：示例产品（P）\r\n[TERMS]\r\nConcept: 1\r\nSource: 对象型号\r\nTarget: 対象機種\r\nStatus: Preferred\r\n=== id: 2 ===\r\n系统将在 {0} 秒后关闭，请保存文件 %s。\r\n\r\n[USER_PROMPT]\r\nUse a formal tone.\r\n\r\n[COMMENT_PROMPT]\r\nInclude a brief explanation."
+    }
+  ],
+  "stream": false
+}
