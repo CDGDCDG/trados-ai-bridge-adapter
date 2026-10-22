@@ -218,7 +218,64 @@ chcp 65001 >nul
 
 ---
 
-## 12. 提交 issue 时请附上
+## 12. GUI 相关问题
+
+### 提示找不到 AIBridgeAdapter.exe
+
+`AIBridgeAdapterGui.exe` 和 `AIBridgeAdapter.exe` 必须放在同一目录。
+
+```text
+AIBridgeAdapterGui.exe
+AIBridgeAdapter.exe
+```
+
+运行 `build.cmd` 可同时生成两个文件。
+
+### 刷新模型失败
+
+检查：
+
+1. API 地址是否正确（不要填 `/chat/completions`）。
+2. `llama-server` 是否已启动。
+3. 上游需要 Key 时，是否勾选并填写了正确的 Bearer Key。
+4. 网络/防火墙是否允许访问该地址。
+
+刷新失败不影响手动输入模型：直接在“模型”框里填模型 id 或 GGUF 路径即可。
+
+### 点启动后立即停止
+
+最常见原因是端口被占用：
+
+- 9932 已有旧的适配器或命令行实例。
+- 换一个监听端口，例如 `9933`。
+- 或先停止旧的 `AIBridgeAdapter.exe`。
+
+GUI 日志和 `bridge.log` 会显示 `cannot listen on 127.0.0.1:...`。
+
+### 上游返回 401 / 403
+
+- 勾选“使用 Authorization Bearer API Key”，填入上游的 Key。
+- 启动日志应显示 `Auth : Bearer configured`。
+- AI Bridge 连接设置里的 API Key 不会转发给上游；它只用于 AI Bridge 到适配器这一段。
+- GUI 里保存的 Key 使用 Windows DPAPI 加密；换 Windows 用户后需要重新输入。
+
+### 关闭 GUI 后适配器还在运行
+
+正常退出时 GUI 会询问是否停止适配器。若 GUI 被强制结束，子进程可能残留：
+
+1. 打开任务管理器。
+2. 结束 `AIBridgeAdapter.exe`。
+3. 重新启动 GUI。
+
+### 设置无法保存 / Key 解密失败
+
+- `gui-settings.json` 必须在 GUI 有写权限的目录。
+- 换 Windows 用户或重装系统后，DPAPI 无法解密旧 Key；重新输入即可。
+- 删除 `gui-settings.json` 会恢复默认设置。
+
+---
+
+## 13. 提交 issue 时请附上
 
 - 适配器版本（`v1.0.1` 等）
 - 引擎（gemma / hymt2）

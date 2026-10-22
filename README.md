@@ -12,6 +12,8 @@ It was built for two model families:
 
 It runs on Windows, listens on `127.0.0.1:9932`, calls a local `llama-server` on `127.0.0.1:9931`, and returns the `TransUnits` JSON that AI Bridge expects.
 
+A WinForms GUI is included for configuring the upstream API address, listen port, model, engine, tag mode, and optional Bearer API key, with start/stop and live logs.
+
 > Not affiliated with RWS, Google, or Tencent. Use at your own risk.
 
 ---
@@ -99,6 +101,8 @@ The adapter also proxies `GET /v1/models`, answers the AI Bridge connection test
 
 ## Features
 
+- WinForms GUI for upstream URL, port, model, engine, tags, and optional Bearer API key
+- GUI start/stop, live adapter logs, model discovery, encrypted API-key storage
 - Single-segment `[SOURCE]` and batch `[SEGMENTS]` requests
 - CRLF- and LF-safe prompt parsing
 - TranslateGemma engine:
@@ -133,7 +137,10 @@ The adapter also proxies `GET /v1/models`, answers the AI Bridge connection test
 build.cmd
 ```
 
-Output: `AIBridgeAdapter.exe`.
+Outputs:
+
+- `AIBridgeAdapter.exe` — console / CLI adapter
+- `AIBridgeAdapterGui.exe` — WinForms GUI
 
 The build uses:
 
@@ -145,7 +152,26 @@ The build uses:
 
 ## Quick start
 
-### 1. Start llama-server
+### GUI (recommended)
+
+1. Start `llama-server` (see below).
+2. Run `start-gui.bat` or `AIBridgeAdapterGui.exe`.
+3. Set:
+   - **API 地址**: `http://127.0.0.1:9931` (or your LM Studio/Ollama base URL)
+   - **监听端口**: `9932`
+   - Click **刷新模型** and select the model
+   - Optional: enable **使用 Authorization Bearer API Key** and enter the upstream key
+   - **引擎**: auto / TranslateGemma / Hy-MT2
+   - **标签模式**: quality / preserve
+4. Click **启动适配器**. The GUI starts `AIBridgeAdapter.exe` and streams its log.
+5. Copy the displayed **Endpoint** / **Models path** into Trados AI Bridge.
+6. Click **停止适配器** before closing the GUI.
+
+The GUI stores settings in `gui-settings.json`; the API key is encrypted with Windows DPAPI (current user). The key is passed to the adapter through an environment variable, not the command line.
+
+### Manual setup
+
+#### 1. Start llama-server
 
 TranslateGemma example:
 
@@ -172,7 +198,7 @@ Notes:
 - The adapter sends no `Authorization` header. Do not start llama-server with `--api-key` unless you add authentication support to the adapter.
 - Hy-MT2 GGUF builds may require a specific llama.cpp build; see the model card.
 
-### 2. Start the adapter
+#### 2. Start the adapter
 
 For TranslateGemma:
 
@@ -194,7 +220,7 @@ start-auto.bat
 
 Default listener: `http://127.0.0.1:9932/v1/`.
 
-### 3. Configure AI Bridge
+#### 3. Configure AI Bridge
 
 Create or edit a connection:
 
@@ -224,6 +250,8 @@ AIBridgeAdapter.exe [options]
 --upstream <url>    llama-server base URL, default http://127.0.0.1:9931
 --engine <name>     gemma | hymt2, default gemma
 --tags <mode>       quality | preserve, default quality
+--model <id>        Model id/path sent to upstream; empty = first model from /v1/models
+--api-key <key>     Optional upstream Bearer token (or set AIBRIDGE_API_KEY)
 --debug             Write full upstream requests/responses to bridge-debug.log
 ```
 
@@ -232,7 +260,11 @@ Examples:
 ```bat
 AIBridgeAdapter.exe --engine hymt2 --port 9934
 AIBridgeAdapter.exe --engine gemma --upstream http://127.0.0.1:9933
+set AIBRIDGE_API_KEY=your-key
+AIBridgeAdapter.exe --model my-model
 ```
+
+The GUI passes these options automatically and keeps the API key out of the command line.
 
 Run separate adapter instances on different ports only if you also run separate llama-server instances for each model.
 
@@ -280,7 +312,7 @@ Inline XML tags are checked after translation.
 
 - Refinement mode is not supported; the adapter returns HTTP 400.
 - Batch segments are translated sequentially, one model request per segment.
-- The adapter has no authentication or TLS. It binds to `127.0.0.1` only.
+- The adapter has no inbound authentication or TLS; it binds to `127.0.0.1` only. Upstream Bearer authentication is supported.
 - Tag preservation depends on the model; always test with your document.
 - Hy-MT2's GGUF may need a llama.cpp build with the required kernel/template support.
 - TranslateGemma ignores terminology, context, and style prompts.
@@ -296,6 +328,7 @@ Inline XML tags are checked after translation.
 - TranslateGemma 4B IT Q4_K_S GGUF
 - Hy-MT2-7B Q6_K GGUF
 - Hy-MT2-30B-A3B Q6_K GGUF (community quantization)
+- WinForms GUI: model discovery, start/stop, encrypted Bearer key, live logs
 - Windows 11, .NET Framework 4.8
 
 The CRLF fix was verified against a real AI Bridge request:
@@ -318,7 +351,9 @@ The CRLF fix was verified against a real AI Bridge request:
 
 ```text
 src/AIBridgeAdapter.cs          adapter source
-build.cmd                       compile with .NET Framework csc
+src/AIBridgeAdapterGui.cs      WinForms GUI source
+build.cmd                       compile both executables
+start-gui.bat                   launch the GUI
 start-gemma.bat                 run in TranslateGemma mode
 start-hymt2.bat                 run in Hy-MT2 mode
 start-auto.bat                  auto-detect engine from /v1/models

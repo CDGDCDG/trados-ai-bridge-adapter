@@ -1,6 +1,8 @@
 *.exe
 *.log
 *.zip
+gui-settings.json
+gui*.png
 dist/
 .vs/
 bin/

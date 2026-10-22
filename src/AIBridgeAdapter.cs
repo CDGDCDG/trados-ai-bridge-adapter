@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -49,6 +50,8 @@ namespace TradosAIBridgeAdapter
         private static string tagMode = "quality";
         private static string engine = "gemma";
         private static bool engineExplicit;
+        private static string modelOverride;
+        private static string apiKey;
         private static HttpClient http;
         private static readonly object logLock = new object();
         private static readonly string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -83,13 +86,26 @@ namespace TradosAIBridgeAdapter
                 else if (args[i].StartsWith("--tags=", StringComparison.OrdinalIgnoreCase)) tagMode = args[i].Substring(7).Trim().ToLowerInvariant();
                 else if (args[i] == "--engine" && i + 1 < args.Length) { engine = NormalizeEngine(args[++i]); engineExplicit = true; }
                 else if (args[i].StartsWith("--engine=", StringComparison.OrdinalIgnoreCase)) { engine = NormalizeEngine(args[i].Substring(9)); engineExplicit = true; }
+                else if (args[i] == "--model" && i + 1 < args.Length) modelOverride = args[++i].Trim();
+                else if (args[i].StartsWith("--model=", StringComparison.OrdinalIgnoreCase)) modelOverride = args[i].Substring(8).Trim();
+                else if (args[i] == "--api-key" && i + 1 < args.Length) apiKey = args[++i];
+                else if (args[i].StartsWith("--api-key=", StringComparison.OrdinalIgnoreCase)) apiKey = args[i].Substring(10);
                 else if (args[i] == "--debug") debug = true;
+            }
+
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                apiKey = Environment.GetEnvironmentVariable("AIBRIDGE_API_KEY");
             }
 
             try { Console.OutputEncoding = Encoding.UTF8; } catch { }
 
             http = new HttpClient();
             http.Timeout = TimeSpan.FromMinutes(10);
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            }
 
             modelId = FetchModelId();
             if (!engineExplicit && modelId.IndexOf("Hy-MT2", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -102,6 +118,7 @@ namespace TradosAIBridgeAdapter
             Log("  Listen   : http://127.0.0.1:" + listenPort + "/v1/");
             Log("  Upstream : " + upstream);
             Log("  Model    : " + modelId);
+            Log("  Auth     : " + (string.IsNullOrEmpty(apiKey) ? "none" : "Bearer configured"));
             Log("  Tags     : " + tagMode + " (quality = keep wording, preserve = keep inline tags)");
             Log("  Log file : " + Path.Combine(baseDir, "bridge.log"));
             Log("Ready. Press Ctrl+C to stop.");
@@ -114,7 +131,7 @@ namespace TradosAIBridgeAdapter
             catch (Exception ex)
             {
                 Log("ERROR cannot listen on 127.0.0.1:" + listenPort + " - " + ex.Message);
-                Log("Close the program using this port or start with: TranslateGemmaBridge.exe --port 9933");
+                Log("Close the program using this port or start with: AIBridgeAdapter.exe --port 9933");
                 return;
             }
             while (true)
@@ -126,12 +143,17 @@ namespace TradosAIBridgeAdapter
 
         private static string FetchModelId()
         {
+            if (!string.IsNullOrEmpty(modelOverride)) return modelOverride;
             try
             {
                 string body;
                 using (HttpClient probe = new HttpClient())
                 {
                     probe.Timeout = TimeSpan.FromSeconds(3);
+                    if (!string.IsNullOrEmpty(apiKey))
+                    {
+                        probe.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                    }
                     body = probe.GetStringAsync(upstream + "/v1/models").Result;
                 }
                 Dictionary<string, object> root = NewSerializer().DeserializeObject(body) as Dictionary<string, object>;
@@ -201,18 +223,9 @@ namespace TradosAIBridgeAdapter
 
         private static void ProxyModels(NetworkStream stream)
         {
-            try
-            {
-                byte[] data = http.GetByteArrayAsync(upstream + "/v1/models").Result;
-                WriteRaw(stream, 200, "application/json; charset=utf-8", data);
-            }
-            catch (Exception ex)
-            {
-                Log("WARN models proxy failed: " + ex.Message);
-                string fallback = "{\"object\":\"list\",\"data\":[{\"id\":\"" + JsonEscape(modelId) +
-                                  "\",\"object\":\"model\",\"owned_by\":\"llamacpp\"}]}";
-                WriteJson(stream, 200, fallback);
-            }
+            string payload = "{\"object\":\"list\",\"data\":[{\"id\":\"" + JsonEscape(modelId) +
+                             "\",\"object\":\"model\",\"owned_by\":\"local\"}]}";
+            WriteJson(stream, 200, payload);
         }
 
         private static void ProcessChat(NetworkStream stream, string bodyText)

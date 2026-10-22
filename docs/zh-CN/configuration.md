@@ -4,6 +4,47 @@
 
 ---
 
+## 图形界面（推荐）
+
+双击 `start-gui.bat` 或 `AIBridgeAdapterGui.exe`。
+
+### 界面字段
+
+| 字段 | 说明 |
+|---|---|
+| API 地址 | 上游模型服务，例如 `http://127.0.0.1:9931` 或 `http://127.0.0.1:1234/v1` |
+| 监听端口 | 适配器端口，默认 `9932` |
+| 模型 | 点“刷新模型”从上游 `/v1/models` 读取；也可手动输入 |
+| 使用 Authorization Bearer API Key | 上游需要鉴权时勾选并填写 |
+| 引擎 | 自动识别 / TranslateGemma / Hy-MT2 |
+| 标签模式 | quality（译文优先）/ preserve（标签优先） |
+
+### 操作流程
+
+1. 先启动 `llama-server`。
+2. 填写 API 地址，点 **刷新模型**。
+3. 选择模型；如果列表为空，可手动输入模型 id/路径。
+4. 需要时勾选 API Key 并输入。
+5. 点 **启动适配器**。
+6. 把界面显示的 **Endpoint** / **Models path** 复制到 AI Bridge。
+7. 使用完毕后点 **停止适配器**，再关闭 GUI。
+
+### 设置与安全
+
+- 设置保存在同目录的 `gui-settings.json`。
+- API Key 使用 Windows DPAPI（CurrentUser）加密保存。
+- 启动子进程时通过环境变量 `AIBRIDGE_API_KEY` 传递，不出现在命令行。
+- GUI 不读取 AI Bridge 连接里的 API Key；那个 Key 不会转发给上游。
+
+### 注意事项
+
+- GUI 必须保持运行，适配器由它作为子进程启动。
+- 端口被占用时，换一个监听端口，或在命令行使用 `--port`。
+- 如果“刷新模型”失败，检查上游地址、API Key 和 `llama-server` 是否启动；也可以直接手动输入模型。
+- 模型选择会作为 `--model` 传给适配器；留空则使用上游 `/v1/models` 的第一个模型。
+
+---
+
 ## 1. 前置条件
 
 - Windows 10/11
@@ -114,6 +155,8 @@ start-auto.bat
 --upstream http://127.0.0.1:9931
 --engine gemma | hymt2
 --tags quality | preserve
+--model <模型 id/路径>
+--api-key <上游 Bearer Token>    （也可用环境变量 AIBRIDGE_API_KEY）
 --debug
 ```
 
@@ -121,6 +164,8 @@ start-auto.bat
 
 ```bat
 AIBridgeAdapter.exe --engine hymt2 --port 9934
+set AIBRIDGE_API_KEY=your-key
+AIBridgeAdapter.exe --model "HY-MT2-7B-Q6_K.gguf"
 ```
 
 如果要同时连接两个模型，需要分别启动两个 `llama-server`（不同端口）和两个适配器实例；同一台机器同时加载两个大模型通常不现实。
@@ -216,8 +261,10 @@ This connection is running
 ## 9. 安全与隐私
 
 - 适配器只监听 `127.0.0.1`，不接受外部连接。
-- 没有鉴权、没有 TLS；不要暴露到局域网或公网。
+- 适配器本身没有入站鉴权、没有 TLS；不要暴露到局域网或公网。
+- 上游服务可以配置 Bearer API Key；GUI 使用 DPAPI 加密保存，并通过环境变量传给子进程。
 - `bridge.log` 和 `bridge-debug.log` 会包含原文/译文，不要提交或公开。
+- `gui-settings.json` 含加密后的 Key，也不要提交。
 - 本仓库不包含任何 Trados 配置、模型路径或用户文档。
 
 ---
@@ -225,8 +272,9 @@ This connection is running
 ## 10. 验证清单
 
 1. `http://127.0.0.1:9931/v1/models` 返回目标模型。
-2. `http://127.0.0.1:9932/health` 返回 `{"status":"ok"}`。
+2. 适配器监听端口（默认 `http://127.0.0.1:9932/health`）返回 `{"status":"ok"}`。
 3. 启动日志中 `Engine` 与模型匹配。
-4. AI Bridge Test Connection 返回 `This connection is running`。
-5. 短句翻译返回 `TransUnits` JSON，没有 `[USER_PROMPT]` / `[COMMENT_PROMPT]`。
-6. `bridge.log` 出现 `OK single ...` 或 `OK batch ...`。
+4. 如配置了上游 Key，启动日志显示 `Auth : Bearer configured`。
+5. AI Bridge Test Connection 返回 `This connection is running`。
+6. 短句翻译返回 `TransUnits` JSON，没有 `[USER_PROMPT]` / `[COMMENT_PROMPT]`。
+7. `bridge.log` 出现 `OK single ...` 或 `OK batch ...`。

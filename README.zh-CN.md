@@ -12,6 +12,8 @@
 
 程序监听 `127.0.0.1:9932`，把 AI Bridge 的请求转换成模型真正需要的格式，再转发给 `127.0.0.1:9931` 的 `llama-server`，最后按 AI Bridge 要求返回 `TransUnits` JSON。
 
+附带 WinForms 图形界面：可配置上游 API 地址、监听端口、模型、引擎、标签模式、可选 Bearer API Key，并支持启动/停止和实时日志。
+
 > 与 RWS、Google、腾讯无隶属关系，使用风险自负。
 
 ---
@@ -111,13 +113,37 @@ TranslateGemma / Hy-MT2 GGUF
 build.cmd
 ```
 
-输出 `AIBridgeAdapter.exe`。需要 Windows 自带的 .NET Framework 4.8。
+输出：
+
+- `AIBridgeAdapter.exe`：命令行适配器
+- `AIBridgeAdapterGui.exe`：图形界面
+
+需要 Windows 自带的 .NET Framework 4.8。
 
 ---
 
 ## 快速开始
 
-### 1. 启动 llama-server
+### 方式 A：图形界面（推荐）
+
+1. 先启动 `llama-server`（见下方）。
+2. 双击 `start-gui.bat` 或 `AIBridgeAdapterGui.exe`。
+3. 填写：
+   - **API 地址**：`http://127.0.0.1:9931`（也可以是 LM Studio 的 `http://127.0.0.1:1234`）
+   - **监听端口**：`9932`
+   - 点击 **刷新模型**，选择模型
+   - 如上游需要鉴权，勾选 **使用 Authorization Bearer API Key** 并输入 Key
+   - **引擎**：自动识别 / TranslateGemma / Hy-MT2
+   - **标签模式**：quality / preserve
+4. 点击 **启动适配器**。GUI 会在后台启动 `AIBridgeAdapter.exe` 并显示日志。
+5. 把界面上的 **Endpoint** / **Models path** 复制到 Trados AI Bridge。
+6. 关闭 GUI 前先点 **停止适配器**。
+
+设置保存在 `gui-settings.json`；API Key 使用 Windows DPAPI（当前用户）加密，子进程通过环境变量接收，不出现在命令行里。
+
+### 方式 B：命令行
+
+#### 1. 启动 llama-server
 
 TranslateGemma：
 
@@ -143,7 +169,7 @@ llama-server.exe ^
 - Hy-MT2 不要复用 TranslateGemma 的 `--chat-template-file`。
 - 适配器不发送 `Authorization`，所以 llama-server 不要设置 `--api-key`。
 
-### 2. 启动适配器
+#### 2. 启动适配器
 
 ```bat
 start-gemma.bat
@@ -163,7 +189,7 @@ start-auto.bat
 
 默认监听 `http://127.0.0.1:9932/v1/`。
 
-### 3. 配置 AI Bridge
+#### 3. 配置 AI Bridge
 
 | 字段 | 值 |
 |---|---|
@@ -183,8 +209,12 @@ start-auto.bat
 --upstream <url>    上游 llama-server，默认 http://127.0.0.1:9931
 --engine <name>     gemma | hymt2，默认 gemma
 --tags <mode>       quality | preserve，默认 quality
+--model <id>        上游模型 id/路径；留空则使用 /v1/models 的第一个模型
+--api-key <key>     可选的上游 Bearer Token（也可用环境变量 AIBRIDGE_API_KEY）
 --debug             将完整上游请求/响应写入 bridge-debug.log
 ```
+
+GUI 会自动传递这些参数，并通过环境变量传递 API Key，避免出现在命令行中。
 
 ---
 
@@ -229,11 +259,11 @@ start-auto.bat
 
 - 不支持 Refinement 模式，会返回 HTTP 400。
 - 批量按 segment 顺序逐个请求。
-- 无鉴权、无 TLS，只绑定 `127.0.0.1`。
+- 适配器本身无入站鉴权、无 TLS，只绑定 `127.0.0.1`；上游可配置 Bearer API Key。
 - 标签能否保留取决于模型，请用实际文档测试。
 - Hy-MT2 的 GGUF 可能需要特定 llama.cpp 构建。
 - TranslateGemma 不支持术语、上下文、风格指令。
-- 日志可能包含原文和译文，不要提交 `bridge.log` / `bridge-debug.log`。
+- 日志可能包含原文和译文，不要提交 `bridge.log` / `bridge-debug.log`；`gui-settings.json` 含加密 Key，也不要提交。
 
 ---
 
@@ -244,6 +274,7 @@ start-auto.bat
 - TranslateGemma 4B IT Q4_K_S
 - Hy-MT2-7B Q6_K
 - Hy-MT2-30B-A3B Q6_K（社区量化版）
+- WinForms GUI：模型刷新、启动/停止、加密 Bearer Key、实时日志
 - Windows 11 + .NET Framework 4.8
 
 CRLF 修复用真实 AI Bridge 请求验证：
@@ -277,7 +308,9 @@ CRLF 修复用真实 AI Bridge 请求验证：
 
 ```text
 src/AIBridgeAdapter.cs          适配器源码
-build.cmd                       .NET Framework 编译脚本
+src/AIBridgeAdapterGui.cs       WinForms GUI 源码
+build.cmd                       编译两个可执行文件
+start-gui.bat                   启动图形界面
 start-gemma.bat                 TranslateGemma 模式
 start-hymt2.bat                 Hy-MT2 模式
 start-auto.bat                  自动识别模型
