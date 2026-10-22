@@ -4,6 +4,51 @@
 
 ---
 
+## 译文开头出现 “All XML tags...” / “The content within the <Locked...> tag...”
+
+**v1.2.0 及更早版本的 Hy-MT2 提示词问题。**
+
+原因：
+
+- 适配器把“保留 XML 标签/Locked 内容”的说明放在了用户消息里，和原文连在一起。
+- 部分翻译模型（尤其是自定义微调版）会把这段说明也当成待翻译文本，翻译后拼在译文开头。
+- 输出里出现字面量 `<Locked...>` 时，AI Bridge 还可能报 `XmlException`，因为 Trados 把它当成了 XML 标签。
+
+表现示例：
+
+```text
+All XML tags, attributes, placeholders, and formatting markers must be retained; ...
+The content within the <Locked...> tag should remain in its original form.
+如果你试图强行破解密码……
+```
+
+修复：
+
+1. 升级到 **v1.2.1 或更新版本**。
+2. 停止旧适配器和 GUI，替换 `AIBridgeAdapter.exe` 和 `AIBridgeAdapterGui.exe`。
+3. 重启适配器，重新翻译同一段。
+
+v1.2.1 起：
+
+- 用户消息只保留官方最小翻译指令。
+- 标签/Locked/格式保护说明放在 **system message**。
+- 不会再被模型当作原文翻译。
+
+验证：
+
+```text
+bridge.log 出现 OK single ... 或 OK batch ...
+译文开头直接是正文，不再出现 All XML tags...
+```
+
+如果仍然出现：
+
+- 确认运行的是新 exe（检查文件时间/版本目录）。
+- 用 `--debug` 启动，查看 `bridge-debug.log` 里的 `UPSTREAM REQUEST`，确认 `messages` 包含 `system` 和最小 `user` 指令。
+- 确认没有直接连接 9931 绕过适配器。
+
+---
+
 ## 1. 译文里出现 `[USER_PROMPT]` 或 `[COMMENT_PROMPT]`
 
 **版本 1.0.0 及更早版本的已知问题。**

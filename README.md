@@ -309,7 +309,8 @@ Run separate adapter instances on different ports only if you also run separate 
 - Chinese is used when the source or target is Chinese; otherwise English.
 - `[TERMS]` is converted to `source 翻译成 target` / `source translates to target`; forbidden and deprecated entries are skipped.
 - `[CONTEXT]` is passed as read-only background.
-- A non-default `[USER_PROMPT]` is passed as an additional style requirement.
+- A non-default `[USER_PROMPT]` is passed as an additional style requirement in the system message.
+- Tag/format/locked-content preservation instructions are sent in a **system message**, not in the user source block. The user message uses the minimal official translation prompt. This prevents the model from translating the instructions and prepending them to the output.
 - `[COMMENT_PROMPT]` is ignored; the adapter returns an empty comment unless tags were dropped.
 
 ---
@@ -353,6 +354,7 @@ Inline XML tags are checked after translation.
 - TranslateGemma 4B IT Q4_K_S GGUF
 - Hy-MT2-7B Q6_K GGUF
 - Hy-MT2-30B-A3B Q6_K GGUF (community quantization)
+- Prompt-instruction leak fix: minimal user prompt + system instructions verified with 30B
 - WinForms GUI: model discovery, start/stop, encrypted Bearer key, live logs
 - Live monitoring verified during 7B Q6_K translation (current t/s, last request, averages)
 - Windows 11, .NET Framework 4.8

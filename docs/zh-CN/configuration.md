@@ -233,7 +233,8 @@ This connection is running
   - 自动转换为 `源词 翻译成 目标词`
   - 自动跳过 forbidden / deprecated
 - 支持 `[CONTEXT]` 作为只读背景。
-- 支持非默认 `[USER_PROMPT]` 作为附加风格要求。
+- 支持非默认 `[USER_PROMPT]` 作为附加风格要求，放在 system message。
+- 标签/Locked/格式保护说明也放在 system message；用户消息只保留官方最小翻译指令，避免模型把说明当成原文翻译后拼到译文开头。
 - `[COMMENT_PROMPT]` 不处理，Comment 通常为空。
 
 要让 AI Bridge 真正传入术语，需要在 AI Bridge 中启用术语表/术语提供程序。适配器解析不到的格式会原样传给模型。

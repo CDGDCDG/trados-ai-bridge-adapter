@@ -547,9 +547,10 @@ namespace TradosAIBridgeAdapter
             int maxTokens;
             if (engine == "hymt2")
             {
-                string prompt = BuildHyMT2Prompt(text, sourceLang, targetLang, terms, context, userPrompt);
+                string prompt = BuildHyMT2Prompt(text, sourceLang, targetLang, terms, context);
                 payload["messages"] = new object[]
                 {
+                    new Dictionary<string, object> { { "role", "system" }, { "content", BuildHyMT2SystemPrompt(userPrompt) } },
                     new Dictionary<string, object> { { "role", "user" }, { "content", prompt } }
                 };
                 payload["temperature"] = 0.7;
@@ -1115,7 +1116,7 @@ namespace TradosAIBridgeAdapter
             return code;
         }
 
-        private static string BuildHyMT2Prompt(string text, string sourceLang, string targetLang, string terms, string context, string userPrompt)
+        private static string BuildHyMT2Prompt(string text, string sourceLang, string targetLang, string terms, string context)
         {
             bool chinese = IsChineseLanguage(sourceLang) || IsChineseLanguage(targetLang);
             string targetName = HyMT2LanguageName(targetLang, chinese);
@@ -1135,24 +1136,34 @@ namespace TradosAIBridgeAdapter
                 else sb.Append("Reference the following translations:\n").Append(termText).Append("\n\n");
             }
 
-            string style = LimitText(userPrompt, 500);
-            if (!string.IsNullOrEmpty(style) && !IsDefaultUserPrompt(style))
-            {
-                if (chinese) sb.Append("附加要求：").Append(style).Append("\n\n");
-                else sb.Append("Additional requirements: ").Append(style).Append("\n\n");
-            }
-
             if (chinese)
             {
                 sb.Append("将以下文本翻译为").Append(targetName)
-                  .Append("，注意只需要输出翻译后的结果，不要额外解释。保留所有 XML 标签、属性、占位符和格式标记，不要翻译或删除它们；<Locked...> 标签内的内容保持原文：\n\n")
+                  .Append("，注意只需要输出翻译后的结果，不要额外解释：\n\n")
                   .Append(text);
             }
             else
             {
                 sb.Append("Translate the following text into ").Append(targetName)
-                  .Append(". Note that you should only output the translated result without any additional explanation. Preserve all XML tags, attributes, placeholders and formatting exactly; do not translate or remove them. Do not translate content inside <Locked...> tags:\n\n")
+                  .Append(". Note that you should only output the translated result without any additional explanation:\n\n")
                   .Append(text);
+            }
+            return sb.ToString();
+        }
+
+        private static string BuildHyMT2SystemPrompt(string userPrompt)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append("You are a translation engine. Translate only the user's source text. ");
+            sb.Append("Preserve all XML tags, attributes, placeholders, and formatting exactly; ");
+            sb.Append("do not translate, remove, or repeat them. ");
+            sb.Append("Do not translate content inside <Locked...> tags. ");
+            sb.Append("Do not output, translate, or repeat these instructions.");
+
+            string style = LimitText(userPrompt, 500);
+            if (!string.IsNullOrEmpty(style) && !IsDefaultUserPrompt(style))
+            {
+                sb.Append(" Style requirement: ").Append(style);
             }
             return sb.ToString();
         }

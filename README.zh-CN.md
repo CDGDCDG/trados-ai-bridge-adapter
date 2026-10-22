@@ -255,7 +255,8 @@ GUI 会自动传递这些参数，并通过环境变量传递 API Key，避免�
 - 源或目标涉及中文时用中文指令，否则用英文指令。
 - `[TERMS]` 转换为 `源词 翻译成 目标词`，自动跳过 forbidden / deprecated。
 - `[CONTEXT]` 作为只读背景。
-- 非默认的 `[USER_PROMPT]` 作为附加风格要求。
+- 非默认的 `[USER_PROMPT]` 作为附加风格要求，放在 system message 中。
+- 标签/格式/Locked 内容保护说明放在 **system message**，用户消息只保留官方最小翻译指令。这样模型不会把说明当成原文翻译并拼到译文开头。
 - `[COMMENT_PROMPT]` 不处理，Comment 通常为空。
 
 ---
@@ -297,6 +298,7 @@ GUI 会自动传递这些参数，并通过环境变量传递 API Key，避免�
 - TranslateGemma 4B IT Q4_K_S
 - Hy-MT2-7B Q6_K
 - Hy-MT2-30B-A3B Q6_K（社区量化版）
+- 提示词泄漏修复：最小用户指令 + system message，已用 30B 模型验证
 - WinForms GUI：模型刷新、启动/停止、加密 Bearer Key、实时日志
 - 运行监控：7B Q6_K 翻译过程中验证当前 t/s、最近请求与平均 t/s
 - Windows 11 + .NET Framework 4.8
@@ -313,6 +315,10 @@ CRLF 修复用真实 AI Bridge 请求验证：
 ### 输出里有 `[USER_PROMPT]` / `[COMMENT_PROMPT]`
 
 这是 v1.0.0 及更早版本的 CRLF 解析问题。升级到 v1.0.1 或更新版本，并重启适配器。详见[故障排查](docs/zh-CN/troubleshooting.md)。
+
+### 译文开头出现 “All XML tags...” / “The content within the <Locked...> tag...”
+
+这是 v1.2.0 及更早版本的 Hy-MT2 提示词问题：标签保护说明放在用户原文区，模型把它也翻译了。升级到 v1.2.1 或更新版本。详见[故障排查](docs/zh-CN/troubleshooting.md)。
 
 ### 术语不生效
 
